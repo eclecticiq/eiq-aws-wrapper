@@ -10,6 +10,13 @@ def get_ec2_connection():
         sys.exit('Error connecting to EC2 check your AWS credentials!')
 
 
+def get_route53_connection():
+    try:
+        return boto3.client('route53')
+    except Exception as e:
+        sys.exit('Error connecting to route53 check your AWS credentials!')
+
+
 def get_ec2_resource():
     try:
         return boto3.resource('ec2')
@@ -31,10 +38,10 @@ def get_instances_data(ec2_instances):
     instances = []
     for reservation in ec2_instances['Reservations']:
         for instance in reservation['Instances']:
+            instance_data = {}
             instance_tags = get_tags_from_instance(instance=instance)
-            instance_data = instance.copy()
-            instance_data['Name'] = instance_tags['Name'] if "Name" in instance_tags else ''
-            instance_data['Owner'] = instance_tags['Owner'] if "Owner" in instance_tags else ''
+            instance_data.update(instance_tags)
+            instance_data.update(instance)
             instances.append(instance_data)
     return instances
 
@@ -80,7 +87,36 @@ def are_any_filter_tags_on_instance(tags_filter, instances_tags):
     return False
 
 
-def start_instances(instance_ids, dry_run):
+def delete_ip_record_set(record_name, record_value, zone_id, ttl):
+    client = get_route53_connection()
+    try:
+        return client.change_resource_record_sets(
+            HostedZoneId=zone_id,
+            ChangeBatch={
+                'Comment': 'Remove Record Set',
+                'Changes': [
+                    {
+                        'Action': 'DELETE',
+                        'ResourceRecordSet': {
+                            'Name': record_name,
+                            'Type': 'A',
+                            'TTL': ttl,
+                            'ResourceRecords': [
+                                {
+                                    'Value': record_value
+                                },
+                            ],
+                        }
+                    }
+                ]
+            }
+        )
+    except Exception as e:
+        print "Cannot Remove Record Set: {}".format(e.message)
+        pass
+
+
+def start_instances(instance_ids, dry_run=False):
     ec2 = get_ec2_connection()
 
     try:
@@ -92,7 +128,7 @@ def start_instances(instance_ids, dry_run):
         sys.exit("Error starting instances!\n {0}".format(e.message))
 
 
-def stop_instances(instance_ids, dry_run):
+def stop_instances(instance_ids, dry_run=False):
     ec2 = get_ec2_connection()
 
     try:
@@ -105,7 +141,7 @@ def stop_instances(instance_ids, dry_run):
         sys.exit("Error stopping instances!\n {0}".format(e.message))
 
 
-def terminate_instances(instance_ids, dry_run):
+def terminate_instances(instance_ids, dry_run=False):
     ec2 = get_ec2_connection()
 
     try:
@@ -130,6 +166,18 @@ def describe_instances(state=None):
     ec2 = get_ec2_connection()
     ec2_response = ec2.describe_instances(
         Filters=filters,
+    )
+
+    if "Reservations" not in ec2_response:
+        sys.exit("Error talking with AWS - No 'Reservations' key in Response")
+
+    return ec2_response
+
+
+def describe_instances_by_ids(instance_ids):
+    ec2 = get_ec2_connection()
+    ec2_response = ec2.describe_instances(
+        InstanceIds=instance_ids,
     )
 
     if "Reservations" not in ec2_response:
