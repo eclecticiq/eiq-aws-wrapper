@@ -1,7 +1,7 @@
 import sys
 import re
 import boto3
-
+from collections import defaultdict
 
 def get_ec2_connection():
     try:
@@ -34,15 +34,19 @@ def get_instances_ids(ec2_instances):
     return instance_ids
 
 
-def get_instances_data(ec2_instances):
-    instances = []
+def get_instances_data(ec2_instances, filter_by_state=False):
+    instances = defaultdict(list) if filter_by_state else []
     for reservation in ec2_instances['Reservations']:
         for instance in reservation['Instances']:
             instance_data = {}
             instance_tags = get_tags_from_instance(instance=instance)
             instance_data.update(instance_tags)
             instance_data.update(instance)
-            instances.append(instance_data)
+            if filter_by_state:
+                instance_state = 'running' if instance_data['State']['Name'] == 'running' else 'not-running'
+                instances[instance_state].append(instance_data)
+            else:
+                instances.append(instance_data)
     return instances
 
 
